@@ -79,6 +79,9 @@ public class L2tpPacket
     }
   }
 
+  static public L2tpPacket parse(ByteBuffer buf) {
+  }
+
   boolean isControl() {
     return mIsControl;
   }
@@ -103,20 +106,36 @@ public class L2tpPacket
     return mIsPriority;
   }
 
-  int tunnelId() {
+  short tunnelId() {
     return mTunnelId;
   }
 
-  int sessionId() {
+  void tunnelId(short tunnelId) {
+    mTunnelId = tunnelId;
+  }
+
+  short sessionId() {
     return mSessionId;
   }
 
-  int sequenceNo() {
+  void sessionId(short sessionId) {
+    mSessionId = sessionId;
+  }
+
+  short sequenceNo() {
     return mSequenceNo;
   }
 
-  int expectedSequenceNo() {
+  void sequenceNo(short sequenceNo) {
+    mSequenceNo = sequenceNo;
+  }
+
+  short expectedSequenceNo() {
     return mExpectedSequenceNo;
+  }
+
+  void expectedSequenceNo(short expectedSequenceNo) {
+    mExpectedSequenceNo = expectedSequenceNo;
   }
 
   ByteBuffer padding() {
@@ -125,6 +144,10 @@ public class L2tpPacket
 
   ByteBuffer payload() {
     return mBuffer;
+  }
+
+  int payloadLength() {
+    return mBuffer.limit();
   }
 
   int get(ByteBuffer dest) {

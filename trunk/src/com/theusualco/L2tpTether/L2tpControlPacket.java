@@ -67,6 +67,17 @@ public class L2tpControlPacket extends L2tpPacket
     mAvpList.add(avp);
   }
 
+  L2tpAvp getAvp(int attributeType) {
+    for (ListIterator<L2tpAvp> it = mAvpList.listIterator(); it.hasNext(); ) {
+      L2tpAvp avp = it.next();
+      if (avp.vendorId() == (short)((attributeType >> 16) & 0xffff) &&
+          avp.attributeType() == (short)(attributeType & 0xffff)) {
+        return avp;
+      }
+    }
+    return null;
+  }
+
   @Override
   void getPayload(ByteBuffer dest) {
     for (ListIterator<L2tpAvp> it = mAvpList.listIterator(); it.hasNext(); ) {
