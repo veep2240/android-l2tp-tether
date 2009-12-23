@@ -2,6 +2,8 @@ package com.theusualco.L2tpTether;
 
 import java.nio.ByteBuffer;
 
+import android.util.Log;
+
 public class L2tpPacket
 {
   static final int L2TP_HEADER_VERSION = 2;
@@ -16,70 +18,101 @@ public class L2tpPacket
   protected boolean mIsControl;
   protected boolean mHasLength;
   protected boolean mHasSequence;
-  protected boolean mHasOffset;
   protected boolean mIsPriority;
   protected short mTunnelId;
   protected short mSessionId;
   protected short mSequenceNo;
   protected short mExpectedSequenceNo;
-  protected short mOffset;
-  protected ByteBuffer mBuffer;
   protected ByteBuffer mPadding;
+  protected ByteBuffer mPayload;
 
   public L2tpPacket() {
   }
 
-  public L2tpPacket(byte[] buf) {
-    init(ByteBuffer.wrap(buf));
-  }
-
-  public L2tpPacket(ByteBuffer buf) {
-    init(buf);
-  }
-
-  private void init(ByteBuffer buf) {
-    int flags = buf.getShort();
-
-    assert (flags & L2TP_HEADER_MASK_VERSION) == L2TP_HEADER_VERSION;
-    mIsControl = (flags & L2TP_HEADER_MASK_TYPE) != 0;
-    mHasLength = (flags & L2TP_HEADER_MASK_LENGTH) != 0;
-    mHasSequence = (flags & L2TP_HEADER_MASK_SEQUENCE) != 0;
-    mHasOffset = (flags & L2TP_HEADER_MASK_OFFSET) != 0;
-    mIsPriority = (flags & L2TP_HEADER_MASK_PRIORITY) != 0;
-
-    int length = 0;
-    if (mHasLength) {
-      length = buf.getShort();
-    }
-
-    mTunnelId = buf.getShort();
-    mSessionId = buf.getShort();
-
-    if (mHasSequence) {
-      mSequenceNo = buf.getShort();
-      mExpectedSequenceNo = buf.getShort();
-    }
-
-    if (mHasOffset) {
-      mOffset = buf.getShort();
-      mPadding = buf.slice();
-      mPadding.limit(mOffset);
-      buf.position(buf.position() + mOffset);
-    }
-
-    if (mIsControl) {
-      assert mHasLength;
-      assert mHasSequence;
-      assert !mHasOffset;
-      assert !mIsPriority;
-    }
-
-    if (mHasLength) {
-      assert buf.remaining() >= length;
-    }
+  public L2tpPacket(boolean isControl,
+                    boolean hasLength,
+                    boolean hasSequence,
+                    boolean isPriority,
+                    short tunnelId,
+                    short sessionId,
+                    short sequenceNo,
+                    short expectedSequenceNo,
+                    ByteBuffer padding,
+                    ByteBuffer payload) {
+    mIsControl = isControl;
+    mHasLength = hasLength;
+    mHasSequence = hasSequence;
+    mIsPriority = isPriority;
+    mTunnelId = tunnelId;
+    mSessionId = sessionId;
+    mSequenceNo = sequenceNo;
+    mExpectedSequenceNo = expectedSequenceNo;
+    mPadding = padding;
+    mPayload = payload;
   }
 
   static public L2tpPacket parse(ByteBuffer buf) {
+    int startOffset = buf.position();
+    int length = buf.remaining();
+
+    int flags = buf.getShort();
+    if ((flags & L2TP_HEADER_MASK_VERSION) != L2TP_HEADER_VERSION) {
+      Log.d("L2tpPacket", "bad l2tp version");
+      return null;
+    }
+    boolean isControl = (flags & L2TP_HEADER_MASK_TYPE) != 0;
+    boolean hasLength = (flags & L2TP_HEADER_MASK_LENGTH) != 0;
+    boolean hasSequence = (flags & L2TP_HEADER_MASK_SEQUENCE) != 0;
+    boolean hasOffset = (flags & L2TP_HEADER_MASK_OFFSET) != 0;
+    boolean isPriority = (flags & L2TP_HEADER_MASK_PRIORITY) != 0;
+
+    if (hasLength) {
+      int newLength = buf.getShort();
+      if (newLength > length) {
+        Log.d("L2tpPacket", "bad length");
+        return null;
+      }
+      length = newLength;
+    }
+
+    short tunnelId = buf.getShort();
+    short sessionId = buf.getShort();
+
+    short sequenceNo = 0;
+    short expectedSequenceNo = 0;
+    if (hasSequence) {
+      sequenceNo = buf.getShort();
+      expectedSequenceNo = buf.getShort();
+    }
+
+    ByteBuffer padding = null;
+    if (hasOffset) {
+      short offsetLength = buf.getShort();
+      padding = buf.slice();
+      padding.limit(offsetLength);
+      buf.position(buf.position() + offsetLength);
+    }
+
+    ByteBuffer payload = null;
+    int payloadLength = length - (buf.position() - startOffset);
+    if (payloadLength > 0) {
+      payload = buf.slice();
+      payload.limit(payloadLength);
+      buf.position(buf.position() + payloadLength);
+    }
+
+    if (isControl) {
+      if (!hasLength || !hasSequence || padding != null || isPriority) {
+        Log.d("L2tpPacket", "bad fields in control packet");
+        return null;
+      }
+
+      return new L2tpControlPacket(tunnelId, sessionId, sequenceNo, expectedSequenceNo, payload);
+    } else {
+      return new L2tpPacket(isControl, hasLength, hasSequence, isPriority,
+                            tunnelId, sessionId, sequenceNo, expectedSequenceNo,
+                            padding, payload);
+    }
   }
 
   boolean isControl() {
@@ -99,7 +132,7 @@ public class L2tpPacket
   }
 
   boolean hasPadding() {
-    return mHasOffset;
+    return mPadding != null;
   }
 
   boolean isPriority() {
@@ -139,15 +172,21 @@ public class L2tpPacket
   }
 
   ByteBuffer padding() {
+    mPadding.position(0);
     return mPadding;
   }
 
+  int paddingLength() {
+    return mPadding.limit();
+  }
+
   ByteBuffer payload() {
-    return mBuffer;
+    mPayload.position(0);
+    return mPayload;
   }
 
   int payloadLength() {
-    return mBuffer.limit();
+    return mPayload.limit();
   }
 
   int get(ByteBuffer dest) {
@@ -155,7 +194,7 @@ public class L2tpPacket
     if (mIsControl) { flags |= L2TP_HEADER_MASK_TYPE; }
     if (mHasLength) { flags |= L2TP_HEADER_MASK_LENGTH; }
     if (mHasSequence) { flags |= L2TP_HEADER_MASK_SEQUENCE; }
-    if (mHasOffset) { flags |= L2TP_HEADER_MASK_OFFSET; }
+    if (mPadding != null) { flags |= L2TP_HEADER_MASK_OFFSET; }
     if (mIsPriority) { flags |= L2TP_HEADER_MASK_PRIORITY; }
     flags |= L2TP_HEADER_VERSION;
 
@@ -171,8 +210,8 @@ public class L2tpPacket
       dest.putShort(mSequenceNo);
       dest.putShort(mExpectedSequenceNo);
     }
-    if (mHasOffset) {
-      dest.putShort(mOffset);
+    if (mPadding != null) {
+      dest.putShort((short)mPadding.limit());
       dest.put(mPadding);
     }
 
@@ -190,6 +229,6 @@ public class L2tpPacket
   }
 
   void getPayload(ByteBuffer dest) {
-    dest.put(mBuffer);
+    dest.put(mPayload);
   }
 }

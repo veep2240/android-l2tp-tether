@@ -31,19 +31,29 @@ public class L2tpControlPacket extends L2tpPacket
 
   static final short L2TP_PROTOCOL_V1_0 = 0x100;
 
-  private List<L2tpAvp> mAvpList;
+  private List<L2tpAvp> mAvpList = new ArrayList();
 
   public L2tpControlPacket(short messageType) {
     super();
     mIsControl = true;
     mHasLength = true;
     mHasSequence = true;
-    mAvpList = new ArrayList();
     addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_MESSAGE_TYPE, messageType));
   }
 
-  public L2tpControlPacket(ByteBuffer buffer) {
-    init(buffer);
+  public L2tpControlPacket(short tunnelId,
+                           short sessionId,
+                           short sequenceNo,
+                           short expectedSequenceNo,
+                           ByteBuffer payload) {
+    super(true,  // isControl
+          true,  // hasLength
+          true,  // hasSequence
+          false,  // isPriority
+          tunnelId, sessionId, sequenceNo, expectedSequenceNo,
+          null,  // Padding
+          null);  // Payload
+    init(payload);
   }
 
   private void init(ByteBuffer src) {
