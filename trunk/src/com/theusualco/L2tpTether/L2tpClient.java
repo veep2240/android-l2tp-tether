@@ -1,12 +1,14 @@
 package com.theusualco.L2tpTether;
 
 import java.io.IOException;
+import java.lang.InterruptedException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.net.SocketException;
 import java.nio.ByteBuffer;
-import java.lang.InterruptedException;
+import java.util.ArrayList;
+import java.util.List;
 
 import android.util.Log;
 
@@ -19,9 +21,13 @@ public class L2tpClient implements Runnable
   private DatagramSocket mL2tpSocket;
   private Thread mListenThread;
 
-  private short mPeerTunnelId = 0;
-  private short mSequenceNo = 0;
-  private short mExpectedSequenceNo = 0;
+  private short mPeerTunnelId;
+  private short mPeerSessionId;
+  private short mSequenceNo;
+  private short mExpectedSequenceNo;
+
+  private List<L2tpPacket> mPacketSendQueue = new ArrayList();
+  private int mReceiveWindowSize = 4;
 
   public L2tpClient(InetAddress addr, int port) throws SocketException {
     mL2tpAddr = addr;
@@ -42,14 +48,38 @@ public class L2tpClient implements Runnable
     mListenThread.join();
   }
 
-  void sendPacket(L2tpPacket packet) {
+  void startSession() {
+    sendICRQ();
+  }
+
+  void stopSession() {
+  }
+
+  void maybeSendPacket(L2tpPacket packet) {
     packet.tunnelId(mPeerTunnelId);
     packet.sequenceNo(mSequenceNo);
-    packet.expectedSequenceNo(mExpectedSequenceNo);
 
-    if (packet.isControl() && ((L2tpControlPacket)packet).avpCount() > 0) {
-      mSequenceNo++;
+    // Don't queue/reliably deliver data or ZLB packets
+    if (!packet.isControl() || ((L2tpControlPacket)packet).avpCount() == 0) {
+      sendPacket(packet);
+      return;
     }
+
+    mSequenceNo++;
+
+    // Queue the packet and send it if it's in the window
+    mPacketSendQueue.add(packet);
+    if (mPacketSendQueue.size() < mReceiveWindowSize) {
+      sendPacket(packet);
+    } else {
+      Log.d("L2tpClient", "Too many queued packets, not sending");
+    }
+  }
+
+  void sendPacket(L2tpPacket packet) {
+    Log.d("L2tpClient", "send packet");
+
+    packet.expectedSequenceNo(mExpectedSequenceNo);
 
     byte[] data = new byte[1500];
     int length = packet.get(ByteBuffer.wrap(data));
@@ -68,25 +98,41 @@ public class L2tpClient implements Runnable
     sccrq.addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_FRAMING_CAPABILITIES, (int)0));
     sccrq.addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_ASSIGNED_TUNNEL_ID, LOCAL_TUNNEL_ID));
 
-    sendPacket(sccrq);
+    maybeSendPacket(sccrq);
   }
 
   void sendSCCCN() {
     L2tpControlPacket scccn = new L2tpControlPacket(L2tpControlPacket.L2TP_CTRL_TYPE_SCCCN);
 
-    sendPacket(scccn);
+    maybeSendPacket(scccn);
   }
 
   void sendHELLO() {
     L2tpControlPacket hello = new L2tpControlPacket(L2tpControlPacket.L2TP_CTRL_TYPE_HELLO);
 
-    sendPacket(hello);
+    maybeSendPacket(hello);
   }
 
   void sendZLB() {
     L2tpControlPacket zlb = new L2tpControlPacket();
 
-    sendPacket(zlb);
+    maybeSendPacket(zlb);
+  }
+
+  void sendICRQ() {
+    L2tpControlPacket icrq = new L2tpControlPacket(L2tpControlPacket.L2TP_CTRL_TYPE_ICRQ);
+    icrq.addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_ASSIGNED_SESSION_ID, (short)1));
+    icrq.addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_CALL_SERIAL_NUMBER, (int)1));
+
+    maybeSendPacket(icrq);
+  }
+
+  void sendICCN() {
+    L2tpControlPacket iccn = new L2tpControlPacket(L2tpControlPacket.L2TP_CTRL_TYPE_ICCN);
+    iccn.addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_CONNECT_SPEED, (int)0));
+    iccn.addAvp(new L2tpAvp(true, L2tpAvp.L2TP_AVP_FRAMING_TYPE, (short)0));
+
+    maybeSendPacket(iccn);
   }
 
   public void run() {
@@ -105,6 +151,8 @@ public class L2tpClient implements Runnable
 
       if (l2tpPacket.isControl()) {
         handleControlPacket((L2tpControlPacket)l2tpPacket);
+      } else {
+        Log.d("L2tpClient", "DATA packet");
       }
     }
   }
@@ -117,8 +165,22 @@ public class L2tpClient implements Runnable
       return;
     }
 
+    Log.d("L2tpClient", "queue size: " + mPacketSendQueue.size());
+    // Remove any acknowledged packets from the queue
+    while (!mPacketSendQueue.isEmpty() &&
+           mPacketSendQueue.get(0).sequenceNo() < packet.expectedSequenceNo()) {
+      Log.d("L2tpClient", "removing queued entry");
+      mPacketSendQueue.remove(0);
+
+      // Send any new packet that has been shifted into the window
+      if (mPacketSendQueue.size() >= mReceiveWindowSize) {
+        Log.d("L2tpClient", "sending queued entry");
+        sendPacket(mPacketSendQueue.get(mReceiveWindowSize-1));
+      }
+    }
+
     if (packet.avpCount() == 0) {  // ZLB
-      Log.d("L2tpClient", "ZLB");
+      Log.d("L2tpClient", "got ZLB");
       return;
     }
 
@@ -133,6 +195,12 @@ public class L2tpClient implements Runnable
     switch (packet.messageType()) {
       case L2tpControlPacket.L2TP_CTRL_TYPE_SCCRP:
         handleSCCRP(packet);
+        break;
+      case L2tpControlPacket.L2TP_CTRL_TYPE_ICRP:
+        handleICRP(packet);
+        break;
+      case L2tpControlPacket.L2TP_CTRL_TYPE_CDN:
+        handleCDN(packet);
         break;
       case L2tpControlPacket.L2TP_CTRL_TYPE_HELLO:
         handleHELLO(packet);
@@ -152,6 +220,18 @@ public class L2tpClient implements Runnable
       return;
     }
 
+    // Optional
+    L2tpAvp rxWindowSizeAvp = packet.getAvp(L2tpAvp.L2TP_AVP_RECEIVE_WINDOW_SIZE);
+    if (rxWindowSizeAvp != null) {
+      ByteBuffer receiveWindowSize = rxWindowSizeAvp.attributeValue();
+      if (receiveWindowSize.limit() != 2) {
+        Log.d("L2tpClient", "bad Receive-Window-Size");
+        return;
+      }
+      mReceiveWindowSize = receiveWindowSize.getShort();
+      if (mReceiveWindowSize <= 0) { mReceiveWindowSize = 1; }
+    }
+
     ByteBuffer tunnelId = packet.getAvp(L2tpAvp.L2TP_AVP_ASSIGNED_TUNNEL_ID).attributeValue();
     if (tunnelId.limit() != 2) {
       Log.d("L2tpClient", "bad Assigned-Tunnel-Id");
@@ -159,12 +239,34 @@ public class L2tpClient implements Runnable
     }
 
     mPeerTunnelId = tunnelId.getShort();
+    Log.d("L2tpClient", "Tunnel-Id = " + mPeerTunnelId);
 
     sendSCCCN();
   }
 
   void handleHELLO(L2tpControlPacket packet) {
     Log.d("L2tpClient", "handleHELLO");
+
+    sendZLB();
+  }
+
+  void handleICRP(L2tpControlPacket packet) {
+    Log.d("L2tpClient", "handleICRP");
+
+    ByteBuffer sessionId = packet.getAvp(L2tpAvp.L2TP_AVP_ASSIGNED_SESSION_ID).attributeValue();
+    if (sessionId.limit() != 2) {
+      Log.d("L2tpClient", "bad Assigned-Session-Id");
+      return;
+    }
+
+    mPeerSessionId = sessionId.getShort();
+    Log.d("L2tpClient", "Session-Id = " + mPeerSessionId);
+
+    sendICCN();
+  }
+
+  void handleCDN(L2tpControlPacket packet) {
+    Log.d("L2tpClient", "handleICRP");
 
     sendZLB();
   }
