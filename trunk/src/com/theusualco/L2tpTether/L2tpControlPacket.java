@@ -33,6 +33,13 @@ public class L2tpControlPacket extends L2tpPacket
 
   private List<L2tpAvp> mAvpList = new ArrayList();
 
+  public L2tpControlPacket() {
+    super();
+    mIsControl = true;
+    mHasLength = true;
+    mHasSequence = true;
+  }
+
   public L2tpControlPacket(short messageType) {
     super();
     mIsControl = true;
@@ -53,7 +60,9 @@ public class L2tpControlPacket extends L2tpPacket
           tunnelId, sessionId, sequenceNo, expectedSequenceNo,
           null,  // Padding
           null);  // Payload
-    init(payload);
+    if (payload != null) {
+      init(payload);
+    }
   }
 
   private void init(ByteBuffer src) {
@@ -86,6 +95,10 @@ public class L2tpControlPacket extends L2tpPacket
       }
     }
     return null;
+  }
+
+  int avpCount() {
+    return mAvpList.size();
   }
 
   @Override

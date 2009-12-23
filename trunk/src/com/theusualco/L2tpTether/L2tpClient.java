@@ -44,8 +44,12 @@ public class L2tpClient implements Runnable
 
   void sendPacket(L2tpPacket packet) {
     packet.tunnelId(mPeerTunnelId);
-    packet.sequenceNo(mSequenceNo++);
+    packet.sequenceNo(mSequenceNo);
     packet.expectedSequenceNo(mExpectedSequenceNo);
+
+    if (packet.isControl() && ((L2tpControlPacket)packet).avpCount() > 0) {
+      mSequenceNo++;
+    }
 
     byte[] data = new byte[1500];
     int length = packet.get(ByteBuffer.wrap(data));
@@ -73,6 +77,18 @@ public class L2tpClient implements Runnable
     sendPacket(scccn);
   }
 
+  void sendHELLO() {
+    L2tpControlPacket hello = new L2tpControlPacket(L2tpControlPacket.L2TP_CTRL_TYPE_HELLO);
+
+    sendPacket(hello);
+  }
+
+  void sendZLB() {
+    L2tpControlPacket zlb = new L2tpControlPacket();
+
+    sendPacket(zlb);
+  }
+
   public void run() {
     while (true) {
       byte[] data = new byte[1500];
@@ -94,25 +110,32 @@ public class L2tpClient implements Runnable
   }
 
   void handleControlPacket(L2tpControlPacket packet) {
+    Log.d("L2tpClient", "control packet Ns=" + packet.sequenceNo() + ", Nr=" + packet.expectedSequenceNo());
+
     if (packet.tunnelId() != LOCAL_TUNNEL_ID) {
       Log.d("L2tpClient", "bad tunnel id");
       return;
     }
 
+    if (packet.avpCount() == 0) {  // ZLB
+      Log.d("L2tpClient", "ZLB");
+      return;
+    }
+
     if (packet.sequenceNo() != mExpectedSequenceNo) {
-      Log.d("L2tpClient", "bad sequence #");
+      Log.d("L2tpClient", "bad sequence # " + packet.sequenceNo() + " != " + mExpectedSequenceNo);
+      sendZLB();
       return;
     }
 
     mExpectedSequenceNo++;
 
-    if (packet.payloadLength() == 0) {  // ZLB
-      return;
-    }
-
     switch (packet.messageType()) {
       case L2tpControlPacket.L2TP_CTRL_TYPE_SCCRP:
         handleSCCRP(packet);
+        break;
+      case L2tpControlPacket.L2TP_CTRL_TYPE_HELLO:
+        handleHELLO(packet);
         break;
       default:
         Log.d("L2tpClient", "unknown message type");
@@ -121,6 +144,8 @@ public class L2tpClient implements Runnable
   }
 
   void handleSCCRP(L2tpControlPacket packet) {
+    Log.d("L2tpClient", "handleSCCRP");
+
     ByteBuffer version = packet.getAvp(L2tpAvp.L2TP_AVP_PROTOCOL_VERSION).attributeValue();
     if (version.limit() != 2 || version.getShort() != L2tpControlPacket.L2TP_PROTOCOL_V1_0) {
       Log.d("L2tpClient", "bad Protocol-Version");
@@ -134,5 +159,13 @@ public class L2tpClient implements Runnable
     }
 
     mPeerTunnelId = tunnelId.getShort();
+
+    sendSCCCN();
+  }
+
+  void handleHELLO(L2tpControlPacket packet) {
+    Log.d("L2tpClient", "handleHELLO");
+
+    sendZLB();
   }
 }
