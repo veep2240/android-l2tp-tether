@@ -85,7 +85,7 @@ public class L2tpClient implements Runnable
         break;
       }
 
-      L2tpPacket l2tpPacket = new L2tpPacket(ByteBuffer.wrap(packet.getData(), 0, packet.getLength()));
+      L2tpPacket l2tpPacket = L2tpPacket.parse(ByteBuffer.wrap(packet.getData(), 0, packet.getLength()));
 
       if (l2tpPacket.isControl()) {
         handleControlPacket((L2tpControlPacket)l2tpPacket);
