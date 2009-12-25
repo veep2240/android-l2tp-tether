@@ -10,16 +10,22 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.os.Handler;
+import android.os.Message;
 import android.util.Log;
 
 public class L2tpClient implements Runnable
 {
   private static final short LOCAL_TUNNEL_ID = 31337;
 
+  private static final int TUNNEL_ESTABLISHED = 1;
+  private static final int SESSION_ESTABLISHED = 2;
+
   private InetAddress mL2tpAddr;
   private int mL2tpPort;
   private DatagramSocket mL2tpSocket;
   private Thread mListenThread;
+  private Handler mHandler;
 
   private short mPeerTunnelId;
   private short mPeerSessionId;
@@ -33,6 +39,28 @@ public class L2tpClient implements Runnable
     mL2tpAddr = addr;
     mL2tpPort = port;
     mL2tpSocket = new DatagramSocket();
+  }
+
+  void handler(Handler handler) {
+    mHandler = handler;
+  }
+
+  private void postTunnelEstablished() {
+    if (mHandler != null) {
+      Message msg = Message.obtain();
+      msg.obj = this;
+      msg.what = TUNNEL_ESTABLISHED;
+      mHandler.sendMessage(msg);
+    }
+  }
+
+  private void postSessionEstablished() {
+    if (mHandler != null) {
+      Message msg = Message.obtain();
+      msg.obj = this;
+      msg.what = SESSION_ESTABLISHED;
+      mHandler.sendMessage(msg);
+    }
   }
 
   void startTunnel() {
@@ -242,6 +270,8 @@ public class L2tpClient implements Runnable
     Log.d("L2tpClient", "Tunnel-Id = " + mPeerTunnelId);
 
     sendSCCCN();
+
+    postTunnelEstablished();
   }
 
   void handleHELLO(L2tpControlPacket packet) {
@@ -263,6 +293,8 @@ public class L2tpClient implements Runnable
     Log.d("L2tpClient", "Session-Id = " + mPeerSessionId);
 
     sendICCN();
+
+    postSessionEstablished();
   }
 
   void handleCDN(L2tpControlPacket packet) {
