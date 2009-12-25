@@ -20,6 +20,8 @@ import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.telephony.TelephonyManager;
@@ -38,6 +40,12 @@ public class L2tpTetherActivity extends Activity implements Runnable
     private L2tpClient mL2tpClient;
     private BluetoothAdapter mAdapter;
     private BluetoothServerSocket mServer;
+
+    private Handler mHandler = new Handler() {
+        public void handleMessage(Message msg) {
+            Log.d("L2tpTetherActivity", "handleMessage");
+        }
+    };
 
     /** Called when the activity is first created. */
     @Override
@@ -77,6 +85,7 @@ public class L2tpTetherActivity extends Activity implements Runnable
           return false;
         }
 
+        mL2tpClient.handler(mHandler);
         mL2tpClient.startTunnel();
         return true;
     }
