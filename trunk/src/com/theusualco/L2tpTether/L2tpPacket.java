@@ -131,6 +131,10 @@ public class L2tpPacket
     return mHasSequence;
   }
 
+  void sequence(boolean sequence) {
+    mHasSequence = sequence;
+  }
+
   boolean hasPadding() {
     return mPadding != null;
   }
