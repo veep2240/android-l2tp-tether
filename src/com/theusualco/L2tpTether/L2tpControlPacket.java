@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.ListIterator;
 
+import android.util.Log;
+
 public class L2tpControlPacket extends L2tpPacket
 {
   // Control Connection Management
@@ -86,7 +88,7 @@ public class L2tpControlPacket extends L2tpPacket
     mAvpList.add(avp);
   }
 
-  L2tpAvp getAvp(int attributeType) {
+  L2tpAvp getAvp(int attributeType) throws AvpNotFoundException {
     for (ListIterator<L2tpAvp> it = mAvpList.listIterator(); it.hasNext(); ) {
       L2tpAvp avp = it.next();
       if (avp.vendorId() == (short)((attributeType >> 16) & 0xffff) &&
@@ -94,7 +96,22 @@ public class L2tpControlPacket extends L2tpPacket
         return avp;
       }
     }
-    return null;
+    Log.d("L2tpControlPacket", "missing avp: " + attributeType);
+    throw new AvpNotFoundException();
+  }
+
+  short getAvpShort(int attributeType) throws AvpNotFoundException, AvpFormatInvalidException {
+    ByteBuffer buf = getAvp(attributeType).attributeValue();
+    if (buf.limit() != 2)
+      throw new AvpFormatInvalidException();
+    return buf.getShort();
+  }
+
+  int getAvpInt(int attributeType) throws AvpNotFoundException, AvpFormatInvalidException {
+    ByteBuffer buf = getAvp(attributeType).attributeValue();
+    if (buf.limit() != 4)
+      throw new AvpFormatInvalidException();
+    return buf.getInt();
   }
 
   int avpCount() {
