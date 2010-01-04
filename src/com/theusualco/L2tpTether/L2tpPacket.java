@@ -51,7 +51,7 @@ public class L2tpPacket
     mPayload = payload;
   }
 
-  static public L2tpPacket parse(ByteBuffer buf) {
+  static public L2tpPacket parse(ByteBuffer buf, byte[] secret) {
     int startOffset = buf.position();
     int length = buf.remaining();
 
@@ -107,7 +107,8 @@ public class L2tpPacket
         return null;
       }
 
-      return new L2tpControlPacket(tunnelId, sessionId, sequenceNo, expectedSequenceNo, payload);
+      return new L2tpControlPacket(tunnelId, sessionId, sequenceNo, expectedSequenceNo,
+                                   payload, secret);
     } else {
       return new L2tpPacket(isControl, hasLength, hasSequence, isPriority,
                             tunnelId, sessionId, sequenceNo, expectedSequenceNo,
@@ -193,7 +194,7 @@ public class L2tpPacket
     return mPayload.limit();
   }
 
-  int get(ByteBuffer dest) {
+  int serialize(ByteBuffer dest) {
     short flags = 0;
     if (mIsControl) { flags |= L2TP_HEADER_MASK_TYPE; }
     if (mHasLength) { flags |= L2TP_HEADER_MASK_LENGTH; }
@@ -219,7 +220,7 @@ public class L2tpPacket
       dest.put(mPadding);
     }
 
-    getPayload(dest);
+    serializePayload(dest);
 
     // Fill in the length field
     int endOffset = dest.position();
@@ -232,7 +233,7 @@ public class L2tpPacket
     return endOffset - startOffset;
   }
 
-  void getPayload(ByteBuffer dest) {
+  void serializePayload(ByteBuffer dest) {
     dest.put(mPayload);
   }
 }

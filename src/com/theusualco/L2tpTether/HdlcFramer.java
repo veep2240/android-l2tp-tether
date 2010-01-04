@@ -12,74 +12,74 @@ public class HdlcFramer {
   public static final byte HDLC_XOR = (byte)0x20;
   public static final byte HDLC_ADDR = (byte)0xFF;
 
-  private ByteBuffer mBuf = ByteBuffer.allocate(8192);
-  private boolean mSyncSeen;
+  private ByteBuffer buf = ByteBuffer.allocate(8192);
+  private boolean syncSeen;
 
   HdlcFramer() {
-    mBuf.position(0).limit(0);
+    buf.position(0).limit(0);
   }
 
   public synchronized void put(byte[] src) {
     Log.d("HdlcFramer", "put()");
-    if (mBuf.limit() + src.length > mBuf.capacity() ||
-        mBuf.position() == mBuf.limit()) {
-      mBuf.compact().flip();
-      if (mBuf.limit() + src.length > mBuf.capacity()) {
+    if (buf.limit() + src.length > buf.capacity() ||
+        buf.position() == buf.limit()) {
+      buf.compact().flip();
+      if (buf.limit() + src.length > buf.capacity()) {
         throw new BufferOverflowException();
       }
     }
-    int pos = mBuf.position();
-    mBuf.position(mBuf.limit()).limit(mBuf.limit() + src.length);
-    mBuf.put(src);
-    mBuf.position(pos);
+    int pos = buf.position();
+    buf.position(buf.limit()).limit(buf.limit() + src.length);
+    buf.put(src);
+    buf.position(pos);
   }
 
   public synchronized void getFrame(ByteBuffer dest) {
     Log.d("HdlcFramer", "getFrame");
-    mBuf.mark();
+    buf.mark();
     dest.mark();
 
     try {
       byte c;
 
       // Ignore bytes leading up to initial sync
-      if (!mSyncSeen) {
-        while ((c = mBuf.get()) != HDLC_SYN)
+      if (!syncSeen) {
+        while ((c = buf.get()) != HDLC_SYN)
           ;
-        mSyncSeen = true;
       }
 
       // Skip contiguous sync markers between frames
-      while ((c = mBuf.get()) == HDLC_SYN)
+      while ((c = buf.get()) == HDLC_SYN)
         ;
 
       boolean escaped = false;
-
     loop:
       while (true) {
         switch (c) {
-        case HDLC_SYN:
-          break loop;
-        case HDLC_ESC:
-          if (!escaped) {
-            escaped = true;
+          case HDLC_SYN:
+            break loop;
+          case HDLC_ESC:
+            if (!escaped) {
+              escaped = true;
+              break;
+            }
+            // fall through
+          default:
+            if (escaped) {
+              c ^= HDLC_XOR;
+              escaped = false;
+            }
+            dest.put(c);
             break;
-          }
-          // fall through
-        default:
-          if (escaped) {
-            c ^= HDLC_XOR;
-            escaped = false;
-          }
-          dest.put(c);
-          break;
         }
-        c = mBuf.get();
+        c = buf.get();
       }
     } catch (BufferUnderflowException e) {
-      mBuf.reset();
+      buf.reset();
       dest.reset();
       throw e;  // rethrow
     }
+
+    syncSeen = true;
   }
 }

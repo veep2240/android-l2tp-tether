@@ -33,7 +33,7 @@ public class L2tpControlPacket extends L2tpPacket
 
   static final short L2TP_PROTOCOL_V1_0 = 0x100;
 
-  private List<L2tpAvp> mAvpList = new ArrayList();
+  public List<L2tpAvp> avpList = new ArrayList<L2tpAvp>();
 
   public L2tpControlPacket() {
     super();
@@ -54,7 +54,8 @@ public class L2tpControlPacket extends L2tpPacket
                            short sessionId,
                            short sequenceNo,
                            short expectedSequenceNo,
-                           ByteBuffer payload) {
+                           ByteBuffer payload,
+                           byte[] secret) {
     super(true,  // isControl
           true,  // hasLength
           true,  // hasSequence
@@ -63,66 +64,42 @@ public class L2tpControlPacket extends L2tpPacket
           null,  // Padding
           null);  // Payload
     if (payload != null) {
-      init(payload);
+      init(payload, secret);
     }
   }
 
-  private void init(ByteBuffer src) {
+  private void init(ByteBuffer src, byte[] secret) {
+    byte[] random = null;
     while (src.hasRemaining()) {
-      mAvpList.add(L2tpAvp.getL2tpAvp(src));
+      L2tpAvp avp = L2tpAvp.parse(src, secret, random);
+      avpList.add(avp);
+
+      if (avp.type == L2tpAvp.L2TP_AVP_RANDOM_VECTOR) {
+        random = new byte[avp.value.limit()];
+        avp.value.get(random);
+      }
     }
   }
 
   int messageType() {
-    L2tpAvp avp = mAvpList.get(0);
-    assert avp.vendorId() == L2tpAvp.L2TP_AVP_IETF_VENDOR_ID;
-    assert avp.attributeType() == L2tpAvp.L2TP_AVP_MESSAGE_TYPE;
-    return avp.attributeValue().getShort();
+    L2tpAvp avp = avpList.get(0);
+    assert avp.type == L2tpAvp.L2TP_AVP_MESSAGE_TYPE;
+    assert avp.value.limit() == 2;
+    return avp.value.getShort(0);
   }
 
   void addAvp(L2tpAvp avp) {
-    if (mAvpList.isEmpty()) {
-      assert avp.vendorId() == L2tpAvp.L2TP_AVP_IETF_VENDOR_ID;
-      assert avp.attributeType() == L2tpAvp.L2TP_AVP_MESSAGE_TYPE;
+    if (avpList.isEmpty()) {
+      assert avp.type == L2tpAvp.L2TP_AVP_MESSAGE_TYPE;
     }
-    mAvpList.add(avp);
-  }
-
-  L2tpAvp getAvp(int attributeType) throws AvpNotFoundException {
-    for (ListIterator<L2tpAvp> it = mAvpList.listIterator(); it.hasNext(); ) {
-      L2tpAvp avp = it.next();
-      if (avp.vendorId() == (short)((attributeType >> 16) & 0xffff) &&
-          avp.attributeType() == (short)(attributeType & 0xffff)) {
-        return avp;
-      }
-    }
-    Log.d("L2tpControlPacket", "missing avp: " + attributeType);
-    throw new AvpNotFoundException();
-  }
-
-  short getAvpShort(int attributeType) throws AvpNotFoundException, AvpFormatInvalidException {
-    ByteBuffer buf = getAvp(attributeType).attributeValue();
-    if (buf.limit() != 2)
-      throw new AvpFormatInvalidException();
-    return buf.getShort();
-  }
-
-  int getAvpInt(int attributeType) throws AvpNotFoundException, AvpFormatInvalidException {
-    ByteBuffer buf = getAvp(attributeType).attributeValue();
-    if (buf.limit() != 4)
-      throw new AvpFormatInvalidException();
-    return buf.getInt();
-  }
-
-  int avpCount() {
-    return mAvpList.size();
+    avpList.add(avp);
   }
 
   @Override
-  void getPayload(ByteBuffer dest) {
-    for (ListIterator<L2tpAvp> it = mAvpList.listIterator(); it.hasNext(); ) {
+  void serializePayload(ByteBuffer dest) {
+    for (ListIterator<L2tpAvp> it = avpList.listIterator(); it.hasNext(); ) {
       L2tpAvp avp = it.next();
-      avp.get(dest);
+      avp.serialize(dest);
     }
   }
 }
