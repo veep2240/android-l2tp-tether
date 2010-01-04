@@ -31,8 +31,10 @@ import android.content.Context;
 public class L2tpTetherActivity extends Activity implements Runnable
 {
   private static final String NAME = "L2TP Tether";
-  private static final UUID UUID_SERIAL_PORT_PROFILE = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
-  private static final UUID UUID_DUN_PROFILE = UUID.fromString("00001103-0000-1000-8000-00805F9B34FB");
+  private static final UUID UUID_SERIAL_PORT_PROFILE =
+      UUID.fromString("00001101-0000-1000-8000-00805F9B34FB");
+  private static final UUID UUID_DUN_PROFILE =
+      UUID.fromString("00001103-0000-1000-8000-00805F9B34FB");
 
   private static final String L2TP_HOST = "lns.theusualco.com";
   private static final int L2TP_PORT = 1701;
@@ -162,9 +164,11 @@ public class L2tpTetherActivity extends Activity implements Runnable
     Log.d("L2tpTetherActivity", "handleClientConnection");
     mInStream = socket.getInputStream();
     mOutStream = socket.getOutputStream();
+
+    handleCommandStream();
   }
 
-  void handleCommandStream() {
+  void handleCommandStream() throws IOException {
     Log.d("L2tpTetherActivity", "handleCommandStream");
     BufferedReader bufferedStream = new BufferedReader(new InputStreamReader(mInStream));
 
@@ -194,7 +198,7 @@ public class L2tpTetherActivity extends Activity implements Runnable
     }
   }
 
-  void handleDataStream() {
+  void handleDataStream() throws IOException {
     Log.d("L2tpTetherActivity", "handleDataStream");
 
     final HdlcFramer hdlc = new HdlcFramer();
@@ -208,7 +212,7 @@ public class L2tpTetherActivity extends Activity implements Runnable
         try {
           mL2tpClient.sendPacket(new L2tpPacket() {
             @Override
-            void getPayload(ByteBuffer dest) {
+            void serializePayload(ByteBuffer dest) {
               hdlc.getFrame(dest);
             }
           });

@@ -20,7 +20,7 @@ public class L2tpAvp
 
   // AVPs Applicable To All Control Messages
   static final int L2TP_AVP_MESSAGE_TYPE = 0;
-  static final int L2tP_AVP_RANDOM_VECTOR = 36;
+  static final int L2TP_AVP_RANDOM_VECTOR = 36;
 
   // Result and Error Codes
   static final int L2TP_AVP_RESULT_CODE = 1;
@@ -69,44 +69,42 @@ public class L2tpAvp
   static final int L2TP_AVP_CALL_ERRORS = 34;
   static final int L2TP_AVP_ACCM = 35;
 
-  private boolean mMandatory;
-  private short mVendorId;
-  private short mAttributeType;
-  private ByteBuffer mAttributeValue;
-  private byte[] mSecret;
+  // Member vars
+  public boolean isMandatory;
+  public int type;
+  public ByteBuffer value;
 
-  public L2tpAvp(boolean mandatory, int attributeType, ByteBuffer value) {
-    init(mandatory, attributeType, value);
+  public L2tpAvp(boolean mandatory, int type, ByteBuffer value) {
+    init(mandatory, type, value);
   }
 
-  public L2tpAvp(boolean mandatory, int attributeType, byte[] value) {
-    init(mandatory, attributeType, ByteBuffer.wrap(value));
+  public L2tpAvp(boolean mandatory, int type, byte[] value) {
+    init(mandatory, type, ByteBuffer.wrap(value));
   }
 
-  public L2tpAvp(boolean mandatory, int attributeType, String value) {
-    init(mandatory, attributeType, ByteBuffer.wrap(EncodingUtils.getAsciiBytes(value)));
+  public L2tpAvp(boolean mandatory, int type, String value) {
+    init(mandatory, type, ByteBuffer.wrap(EncodingUtils.getAsciiBytes(value)));
   }
 
-  public L2tpAvp(boolean mandatory, int attributeType, short value) {
+  public L2tpAvp(boolean mandatory, int type, short value) {
     ByteBuffer valueBuffer = ByteBuffer.allocate(2);
     valueBuffer.putShort(value);
-    init(mandatory, attributeType, valueBuffer);
+    init(mandatory, type, valueBuffer);
   }
 
-  public L2tpAvp(boolean mandatory, int attributeType, int value) {
+  public L2tpAvp(boolean mandatory, int type, int value) {
     ByteBuffer valueBuffer = ByteBuffer.allocate(4);
     valueBuffer.putInt(value);
-    init(mandatory, attributeType, valueBuffer);
+    init(mandatory, type, valueBuffer);
   }
 
-  private void init(boolean mandatory, int attributeType, ByteBuffer value) {
-    mMandatory = mandatory;
-    mVendorId = (short)((attributeType >> 16) & 0xffff);
-    mAttributeType = (short)(attributeType & 0xffff);
-    mAttributeValue = value;
+  private void init(boolean mandatory, int type, ByteBuffer value) {
+    this.isMandatory = mandatory;
+    this.type = type;
+    this.value = value;
   }
 
-  static L2tpAvp getL2tpAvp(ByteBuffer src) {
+  static L2tpAvp parse(ByteBuffer src, byte[] secret, byte[] random) {
     int field = src.getShort();
     boolean mandatory = (field & L2TP_AVP_HEADER_MANDATORY_MASK) != 0;
     boolean hidden = (field & L2TP_AVP_HEADER_HIDDEN_MASK) != 0;
@@ -116,74 +114,75 @@ public class L2tpAvp
     length -= L2TP_AVP_HEADER_MINIMUM_LENGTH;
     assert src.remaining() >= length;
 
-    short vendorId = src.getShort();
-    short attributeType = src.getShort();
-    ByteBuffer attributeValue = src.slice();
-    attributeValue.limit(length);
+    int type = src.getInt();
+
+    int remaining = src.remaining();
+    src.limit(length);
+    ByteBuffer value = src.slice();
+    src.limit(remaining);
     src.position(src.position() + length);
 
-    return new L2tpAvp(mandatory, ((vendorId << 16) | attributeType), attributeValue);
+    if (hidden) {
+      unhide(value, value.slice(), type, secret, random);
+      length = value.getShort();
+      value.limit(length);
+      value = value.slice();
+    }
+
+    return new L2tpAvp(mandatory, type, value);
   }
 
-  boolean isMandatory() {
-    return mMandatory;
-  }
+  private static void unhide(ByteBuffer src, ByteBuffer dest,
+                             int type, byte[] secret, byte[] random) {
+    assert dest.remaining() >= src.remaining();
 
-  short vendorId() {
-    return mVendorId;
-  }
+    byte[] typeArray = {
+      (byte)((type & 0xf0) >> 8),
+      (byte)((type & 0x0f))
+    };
 
-  short attributeType() {
-    return mAttributeType;
-  }
-
-  int attributeLength() {
-    return mAttributeValue.limit();
-  }
-
-  ByteBuffer attributeValue() {
-    mAttributeValue.position(0);
-    return mAttributeValue;
-  }
-
-  void get(ByteBuffer dest) {
-    mAttributeValue.position(0);
-
-    internalGet(mMandatory, false, mVendorId, mAttributeType, mAttributeValue, dest);
-  }
-
-  void getHidden(byte[] secret, byte[] random, ByteBuffer dest) throws NoSuchAlgorithmException {
-    mAttributeValue.position(0);
-
-    ByteBuffer value = ByteBuffer.allocate(2 + mAttributeValue.limit());
-    value.putShort((short)mAttributeValue.limit());
-
-    MessageDigest md = MessageDigest.getInstance("md5");
-    byte[] attributeType = { (byte)((mAttributeType & 0xf0) >> 8), (byte)(mAttributeType & 0x0f) };
-    md.update(attributeType);
+    MessageDigest md = null;
+    try {
+      md = MessageDigest.getInstance("md5");
+    } catch (NoSuchAlgorithmException e) {
+      throw new RuntimeException(e.toString());
+    }
+    md.update(typeArray);
     md.update(secret);
     md.update(random);
     byte[] digest = md.digest();
 
-    for (int i = 0; i < 16 && mAttributeValue.remaining() > 0; i++) {
-      value.put((byte)(mAttributeValue.get() ^ digest[i]));
-    }
+    int startPos = src.position();
+    int pos = 0;
+    while (src.remaining() > 0) {
+      if (pos > 0 && pos % digest.length == 0) {
+        byte[] last = new byte[digest.length];
+        src.position(startPos + pos - digest.length);
+        src.get(last);
 
-    while (mAttributeValue.remaining() > 0) {
-      md.reset();
-      md.update(secret);
-      md.update(digest);
-      digest = md.digest();
-
-      for (int i = 0; i < 16 && mAttributeValue.remaining() > 0; i++) {
-        value.put((byte)(mAttributeValue.get() ^ digest[i]));
+        md.reset();
+        md.update(secret);
+        md.update(last);
+        digest = md.digest();
       }
-    }
 
-    internalGet(mMandatory, true, mVendorId, mAttributeType, value, dest);
+      dest.put((byte)(src.get() ^ digest[pos++ % digest.length]));
+    }
   }
 
-  private void internalGet(boolean mandatory, boolean hidden, short vendorId, short attributeType, ByteBuffer value, ByteBuffer dest) {
+  void serialize(ByteBuffer dest) {
+    doSerialize(isMandatory, false, type, value, dest);
+  }
+
+  void serializeHidden(byte[] secret, byte[] random, ByteBuffer dest) {
+    ByteBuffer hiddenValue = ByteBuffer.allocate(2 + value.limit());
+    hiddenValue.putShort((short)value.limit());
+    unhide(value, hiddenValue, type, secret, random);
+    doSerialize(isMandatory, true, type, hiddenValue, dest);
+  }
+
+  private void doSerialize(boolean mandatory, boolean hidden, int type, ByteBuffer value,
+                           ByteBuffer dest) {
     short flags = L2TP_AVP_HEADER_MINIMUM_LENGTH;
     flags += value.limit();
     flags &= L2TP_AVP_HEADER_LENGTH_MASK;
@@ -191,8 +190,7 @@ public class L2tpAvp
     if (hidden) { flags |= L2TP_AVP_HEADER_HIDDEN_MASK; }
 
     dest.putShort(flags);
-    dest.putShort(vendorId);
-    dest.putShort(attributeType);
+    dest.putInt(type);
     dest.put(value);
   }
 }
