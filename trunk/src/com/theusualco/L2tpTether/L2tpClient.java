@@ -384,6 +384,10 @@ public class L2tpClient implements Runnable
       for (ListIterator<L2tpAvp> it = packet.avpList.listIterator(); it.hasNext();) {
 	L2tpAvp avp = it.next();
 	switch (avp.type) {
+          case L2tpAvp.L2TP_AVP_MESSAGE_TYPE:
+          case L2tpAvp.L2TP_AVP_FRAMING_CAPABILITIES:
+          case L2tpAvp.L2TP_AVP_HOST_NAME:
+            break;
 	  case L2tpAvp.L2TP_AVP_PROTOCOL_VERSION:
 	    if (avp.value.limit() != 2 || avp.value.getShort(0) != L2tpControlPacket.L2TP_PROTOCOL_V1_0) {
 	      Log.d("L2tpClient", "bad Protocol-Version");
@@ -436,6 +440,8 @@ public class L2tpClient implements Runnable
       for (ListIterator<L2tpAvp> it = packet.avpList.listIterator(); it.hasNext();) {
 	L2tpAvp avp = it.next();
 	switch (avp.type) {
+          case L2tpAvp.L2TP_AVP_MESSAGE_TYPE:
+            break;
 	  case L2tpAvp.L2TP_AVP_ASSIGNED_SESSION_ID:
             if (avp.value.limit() != 2 || (peerSessionId = avp.value.getShort(0)) == 0) {
 	      Log.d("L2tpClient", "bad Session-Id");
