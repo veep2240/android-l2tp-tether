@@ -116,11 +116,12 @@ public class L2tpAvp
 
     int type = src.getInt();
 
+    int position = src.position();
     int remaining = src.remaining();
-    src.limit(length);
+    src.limit(position+length);
     ByteBuffer value = src.slice();
-    src.limit(remaining);
-    src.position(src.position() + length);
+    src.limit(position+remaining);
+    src.position(position+length);
 
     if (hidden) {
       unhide(value, value.slice(), type, secret, random);
@@ -171,13 +172,17 @@ public class L2tpAvp
   }
 
   void serialize(ByteBuffer dest) {
+    int pos = value.position();
+    value.position(0);
     doSerialize(isMandatory, false, type, value, dest);
+    value.position(pos);
   }
 
   void serializeHidden(byte[] secret, byte[] random, ByteBuffer dest) {
     ByteBuffer hiddenValue = ByteBuffer.allocate(2 + value.limit());
     hiddenValue.putShort((short)value.limit());
     unhide(value, hiddenValue, type, secret, random);
+    hiddenValue.position(0);
     doSerialize(isMandatory, true, type, hiddenValue, dest);
   }
 
